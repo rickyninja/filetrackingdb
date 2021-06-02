@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Spider directories passed as args to script and store metadata about files
+# as json blobs in redis.
+#
+# Fetch data later in another script:
+#jeremys@skynet> redis-cli HGETALL "/home/jeremys/mnt/mp3/Halestorm/Halestorm/01 It's Not You.mp3"
+#1) "mode"
+#2) "0644"
+#3) "size"
+#4) "4311070"
+#5) "discovered"
+#6) "Tue 01 Jun 2021 08:35:39 PM MST"
+#7) "md5sum"
+#8) "f1275e822e327e70d4aeb9e972e5ae92"
+#
+#jeremys@skynet> redis-cli HGET "/home/jeremys/mnt/mp3/Halestorm/Halestorm/01 It's Not You.mp3" md5sum
+#"f1275e822e327e70d4aeb9e972e5ae92"
+
+
+function warn {
+    1>&2 echo $@
+}
+
+function die {
+    warn $@
+    exit 1
+}
+
+function usage {
+    die <<< usage: $0 dir1 dir2 ...
+}
+
+# jeremys@skynet> md5sum mnt/mp3/Halestorm/Halestorm/01\ It\'s\ Not\ You.mp3
+# f1275e822e327e70d4aeb9e972e5ae92  mnt/mp3/Halestorm/Halestorm/01 It's Not You.mp3
+function md5 {
+    printf -- $(md5sum "$1" | cut -d' ' -f1)
+}
+
+#jeremys@skynet> stat mnt/mp3/Halestorm/Halestorm/01\ It\'s\ Not\ You.mp3
+#  File: mnt/mp3/Halestorm/Halestorm/01 It's Not You.mp3
+#  Size: 4311070         Blocks: 8424       IO Block: 4096   regular file
+#Device: 64h/100d        Inode: 128715791   Links: 1
+#Access: (0644/-rw-r--r--)  Uid: ( 1000/ jeremys)   Gid: ( 1000/ jeremys)
+#Access: 2021-05-25 18:24:02.101233750 -0700
+#Modify: 2020-09-01 17:13:50.544197893 -0700
+#Change: 2020-09-01 17:13:50.544197893 -0700
+# Birth: -
+function store_metadata {
+    local file=$1
+
+    md5sum=$(md5 "$file")
+    st=$(stat "$file")
+    size=$(printf -- "$st" | awk '/Size:/ {print $2}')
+    mode=$(printf -- "$st" | awk '/Access: \(/ {print $2}' | cut -d'/' -f1 | tr -d '(')
+    path=$(readlink -f "$file")
+    # Don't clobber discovered date if already set.
+    discovered=$(redis-cli HGET "$path" discovered)
+    if [[ "$discovered" == "" ]]; then
+        redis-cli HSET "$path" discovered $(date)
+    fi
+    redis-cli HSET "$path" mode "$mode"
+    redis-cli HSET "$path" size "$size"
+    redis-cli HSET "$path" md5sum "$md5sum"
+}
+
+function walkdir {
+    local dir="$1"
+
+    for file in "$dir"/*; do
+        if [ -f "$file" ]; then
+            store_metadata "$file"
+        elif [ -d "$file" ]; then
+            walkdir "$file"
+        fi
+    done
+}
+
+while getopts "h" arg; do
+    case "$arg" in
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+
+for dir in $@; do
+    if [ ! -d "$dir" ]; then
+        die "$dir is not a directory"
+    fi
+    walkdir "$dir"
+done
