@@ -56,7 +56,7 @@ function store_metadata {
     # Don't clobber discovered date if already set.
     discovered=$(redis-cli HGET "$path" discovered)
     if [[ "$discovered" == "" ]]; then
-        redis-cli HSET "$path" discovered $(date)
+        redis-cli HSET "$path" discovered "$(date)"
     fi
     redis-cli HSET "$path" mode "$mode"
     redis-cli HSET "$path" size "$size"
