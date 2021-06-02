@@ -82,6 +82,10 @@ while getopts "h" arg; do
     esac
 done
 
+if [ $# -eq 0 ]; then
+    usage
+fi
+
 for dir in $@; do
     if [ ! -d "$dir" ]; then
         die "$dir is not a directory"
